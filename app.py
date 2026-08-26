@@ -1,9 +1,7 @@
 import collections
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import random
 import time
-from flask import Flask
-
-app = Flask(__name__)
 
 # Source vocabulary text
 with open("corpus.txt", "r", encoding="utf-8") as f:
@@ -33,7 +31,8 @@ def generate_sentence(min_words=18, max_words=36):
             break
         output.append(nxt)
         w1, w2 = w2, nxt
-        # Gracefully end on natural sentence punctuation
+
+ # End on natural sentence punctuation
         if count >= min_words and nxt.endswith(('.', '!', '?')) and not nxt.endswith(('A.D.', 'B.C.', 'p.', 'cf.')):
             break
             
@@ -43,31 +42,32 @@ def generate_sentence(min_words=18, max_words=36):
     return res
 
 
-# The Web Server Route
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def trap(path):
-    time.sleep(0.1)
-    
-    paragraphs = "".join(
-        f"<p>{generate_sentence(18, 30)} {generate_sentence(20, 35)}</p>"
-        for _ in range(3)
+# HTTP request handler
+class HoneypotHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        time.sleep(0.1)
+
+# Get the visited path
+        current_node = (
+            self.path.lstrip("/") if self.path.strip("/") else "archive-root"
         )
-    
-    links = "".join(
-        f'<li><a href="/trap/node-{random.randint(1000, 9999)}">Sub-Archive Node #{random.randint(100, 999)}</a></li>'
-        for _ in range(4)
-    )
 
-    current_node = path if path else "Root Node"
+        paragraphs = "".join(
+            f"<p>{generate_sentence(18, 30)} {generate_sentence(20, 35)}</p>"
+            for _ in range(3)
+        )
 
+        links = "".join(
+            f'<li><a href="/archive/node-{random.randint(1000, 9999)}">Sub-Archive Node #{random.randint(100, 999)}</a></li>'
+            for _ in range(4)
+        )
 
-
-    return f"""<!DOCTYPE html>
+        html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Honeypot Archive</title>
+    <title>Hidden Archive</title>
     <style>
         body {{
             background: #121212;
@@ -94,5 +94,27 @@ def trap(path):
 </body>
 </html>"""
 
+# Convert to bytes and send standard HTTP response headers
+        body_bytes = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_bytes)))
+        self.end_headers()
+        self.wfile.write(body_bytes)
+
+# Suppress default terminal access logs
+    def log_message(self, format, *args):
+        print(f"[TRAP HIT] {self.address_string()} - {args[0]}")
+
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    host = "127.0.0.1"
+    port = 5000  
+
+    server = ThreadingHTTPServer((host, port), HoneypotHandler)
+    print(f"Running on http://{host}:{port}")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nBye bye.")
+        server.server_close()
